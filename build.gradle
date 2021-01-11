@@ -1,0 +1,157 @@
+buildscript {
+	repositories {
+		maven {
+			url "https://nexus.mvmyun.com/repository/maven-public/"
+		}
+	}
+	dependencies {
+		classpath "org.springframework.boot:spring-boot-gradle-plugin:2.3.5.RELEASE"
+		//remove::start[]
+		classpath "org.springframework.cloud:spring-cloud-contract-gradle-plugin:2.2.5.RELEASE"
+	}
+}
+
+plugins {
+	id 'org.springframework.boot' version '2.3.4.RELEASE'
+	id 'io.spring.dependency-management' version '1.0.10.RELEASE'
+	id 'java'
+	id 'groovy'
+	id 'org.springframework.cloud.contract' version '2.2.5.RELEASE'
+	id 'maven-publish'
+	id 'eclipse'
+	id "com.google.cloud.tools.jib" version "2.6.0"
+}
+
+ext {
+	set('springCloudVersion', "Hoxton.SR8")
+	set('HARBOR_HOST', "${findProperty('pro') ? 'registry.cn-beijing.aliyuncs.com' : 'harbor.mvmyun.com'}") // project arg
+	set('username', System.getenv("CONTAINER_REPO_USERNAME")) //System env variable
+	set('password', System.getenv("CONTAINER_REPO_PASSWORD"))
+}
+
+configurations {
+	compileOnly {
+		extendsFrom annotationProcessor
+	}
+}
+
+group = 'com.sjlh.cloud.example'
+version = '0.0.1-SNAPSHOT'
+sourceCompatibility = '11'
+
+repositories {
+	maven {
+		url "https://nexus.mvmyun.com/repository/maven-public/"
+	}
+}
+
+dependencyManagement {
+	imports {
+		mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+	}
+}
+
+/*
+
+  implementation 'org.apache.kafka:kafka-streams'
+  implementation 'org.springframework.cloud:spring-cloud-stream'
+  implementation 'org.springframework.cloud:spring-cloud-stream-binder-kafka'
+  implementation 'org.springframework.cloud:spring-cloud-stream-binder-kafka-streams'
+  implementation 'org.springframework.kafka:spring-kafka'
+  testImplementation 'org.springframework.boot:spring-boot-starter-test'
+  testImplementation 'org.springframework.cloud:spring-cloud-stream:test-binder@test-jar'
+  testImplementation 'org.springframework.kafka:spring-kafka-test' 
+ */
+dependencies {
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	implementation 'org.springframework.boot:spring-boot-starter-hateoas'
+	implementation 'org.apache.kafka:kafka-streams'
+	implementation 'org.springframework.cloud:spring-cloud-starter-sleuth'
+	//implementation 'org.springframework.kafka:spring-kafka:2.3.2.RELEASE'
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	//implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+	implementation 'com.sjlh.springmvc:springmvc-log:0.0.1-SNAPSHOT'
+	//for kafka
+	implementation 'org.springframework.cloud:spring-cloud-stream'
+	implementation 'org.springframework.cloud:spring-cloud-stream-binder-kafka'
+	implementation 'org.springframework.cloud:spring-cloud-stream-binder-kafka-streams'                                        
+	implementation 'org.springframework.kafka:spring-kafka'
+	//implementation 'org.apache.kafka:kafka-clients'
+	implementation 'com.ctrip.framework.apollo:apollo-client:1.7.0'
+	//testImplementation 'org.springframework.cloud:spring-cloud-stream:test-binder@test-jar'
+	testImplementation 'org.springframework.kafka:spring-kafka-test'
+	compileOnly 'org.projectlombok:lombok'
+	runtimeOnly 'mysql:mysql-connector-java'
+	//runtimeOnly 'org.springframework.kafka:spring-kafka'
+	annotationProcessor 'org.projectlombok:lombok'
+	testImplementation("org.springframework.cloud:spring-cloud-stream-test-support")
+	testImplementation('org.springframework.boot:spring-boot-starter-test') {
+		exclude group: 'org.junit.vintage', module: 'junit-vintage-engine'
+	}
+	testImplementation('org.springframework.cloud:spring-cloud-starter-contract-verifier')
+	testImplementation('io.rest-assured:rest-assured')
+	testImplementation('io.rest-assured:xml-path:4.2.0')
+}
+
+def releaseTime() {
+	return new Date().format("yyyy-MM-dd", TimeZone.getTimeZone("GMT+08:00"))
+}
+
+jib {
+	from {
+		image = 'harbor.mvmyun.com/library/openjdk:11.0.7-jre-slim'
+	}
+	to {
+		image = "${HARBOR_HOST}/mvmyun/${name}"
+		tags = ['latest', "${project.version}-${releaseTime()}"]
+		auth {
+			username = System.getenv("CONTAINER_REPO_USERNAME") // Defined in 'gradle.properties'.
+			password = System.getenv("CONTAINER_REPO_PASSWORD")
+		}
+	}
+	container {
+		creationTime = 'USE_CURRENT_TIMESTAMP'
+		jvmFlags = ['-Duser.timezone=Asia/Shanghai', '-Djava.security.egd=file:/dev/./urandom']
+	}
+	allowInsecureRegistries = true
+}
+
+test {
+	useJUnitPlatform()
+}
+
+contracts {
+	failOnNoContracts true
+	
+//	contractDependency {
+//		stringNotation = "${project.group}:${project.name}:${project.version}"
+//	}
+	baseClassForTests 'com.sjlh.cloud.server.controller.ServerPersonBase'
+//	packageWithBaseClasses 'com.sjlh.cloud.server.controller'
+//	baseClassMappings {
+//		baseClassMapping ('.*person.*', 'com.sjlh.cloud.server.controller.ServerPersonBase')
+//	}
+	testFramework 'JUNIT5'
+	contractRepository{
+		//repositoryUrl 'git://zhaoxuemin@gitlab.mvmyun.com:cdc/example/service-person-api.git'//git://git@github.com:spring-cloud-samples/spring-cloud-contract-nodejs-contracts-git.git
+		//repositoryUrl "git://https://gitlab.mvmyun.com/cdc/example/service-person-api.git"
+	}
+	//contractsMode 'REMOTE'
+}
+
+//publishToMavenLocal.dependsOn("publishStubsToScm")
+
+test {
+	testLogging {
+		exceptionFormat = 'full'
+	}
+	afterSuite { desc, result ->
+		if (!desc.parent) {
+			println "Results: (${result.testCount} tests, ${result.successfulTestCount} successes, ${result.failedTestCount} failures, ${result.skippedTestCount} skipped)"
+			boolean skipTests = Boolean.parseBoolean(project.findProperty('SKIP_TESTS') ?: "false")
+			if (result.testCount == 0 && !skipTests) {
+				throw new IllegalStateException("No tests were found. Failing the build")
+			}
+		}
+	}
+}
